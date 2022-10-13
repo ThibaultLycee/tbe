@@ -1,10 +1,10 @@
 # Text Based Editor
 
-Text-based editor is a simple text editor written in Rust<https://www.rust-lang.org>
+Text-based editor is a simple text editor written in [Rust](https://www.rust-lang.org)
 
 ## Inspiration
 
-Tbe was tremandously inspided by Vim<https://www.vim.org>
+Tbe was tremandously inspided by [Vim](https://www.vim.org)
 
 ## Usage
 
