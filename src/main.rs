@@ -5,12 +5,14 @@ use termion::raw::{RawTerminal, IntoRawMode};
 use termion::color;
 use std::io::{Write, stdout, stdin, Stdin, Stdout};
 use std::env;
+use std::process::Command;
 
 // Differents mode for reading / editing
 enum ViewModes
 {
     COMMAND,
-    INSERT
+    INSERT,
+    RUNNING_CMD,
 }
 
 #[derive(Debug)]
@@ -18,8 +20,10 @@ enum Instr {
     LOAD_FILE,
     SAVE_FILE,
     QUIT,
+    RUN(String),
     CHANGE_MODE_COMMAND,
     CHANGE_MODE_INSERT,
+    CHANGE_MODE_RUNNING_CMD,
 }
 
 #[derive(Copy, Clone)]
@@ -43,12 +47,24 @@ impl EscChr {
     const CLR : &str = "\x1Bc";
 }
 
-fn initScreen(stdout : &mut RawTerminal<Stdout>) -> Option<Size2> {
-    // Empties the screen, sets the correct cursor
-    write!(stdout, "{}{}{}", 
+fn clearSeparatorLine(term_s : &mut Size2) {
+    let mut empty_line = String::with_capacity(term_s.x.into());
+    for i in 1..term_s.x { empty_line.push(' '); }
+    print!("{}{}{}{}",
+           termion::cursor::Goto(1, term_s.y-1),
+           color::Bg(color::LightBlack),
+           empty_line,
+           color::Bg(color::Reset));
+}
+
+fn setupScreen(stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2) {
+    write!(stdout, "{}{}",
            EscChr::CLR,
-           termion::cursor::BlinkingBlock,
            termion::cursor::Goto(1, 1)).unwrap();
+    clearSeparatorLine(term_s);
+}
+
+fn initScreen(stdout : &mut RawTerminal<Stdout>) -> Option<Size2> {
     // Tries to get the terminal size
     if let Some((Width(w), Height(h))) = terminal_size() {
         // Prints a '~' at the begining of each line
@@ -58,14 +74,7 @@ fn initScreen(stdout : &mut RawTerminal<Stdout>) -> Option<Size2> {
                    termion::cursor::Goto(1, i),
                    color::Fg(color::Reset));
         }
-        // Creates the command line prompt
-        let mut empty_line = String::with_capacity(w.into());
-        for i in 0..w { empty_line.push(' '); }
-        print!("{}{}{}{}",
-               termion::cursor::Goto(1, h-1),
-               color::Bg(color::LightBlack),
-               empty_line,
-               color::Bg(color::Reset));
+        setupScreen(stdout, &mut Size2::new(w, h));
         print!("{}", termion::cursor::Goto(1, h));
         // Flushes the output
         stdout.flush().unwrap();
@@ -85,13 +94,20 @@ fn remove(stri : &mut String, n : u16) {
 
 fn execCmd(cmd : &mut String, term_s : &mut Size2) -> Vec<Instr> {
     let mut ret : Vec<Instr> = Vec::new();
-    
+    clearSeparatorLine(term_s);
+    print!("{}", termion::cursor::Goto(1, term_s.y));
+
     if cmd.starts_with(":") {
         cmd.remove(0);
         while !cmd.is_empty() {
             if cmd.starts_with("quit") {
                 ret.push(Instr::QUIT);
                 remove(cmd, 4);
+            } else if cmd.starts_with("run") {
+                remove(cmd, 3);
+                ret.push(Instr::CHANGE_MODE_RUNNING_CMD);
+                ret.push(Instr::RUN(cmd.to_string()));
+                break;
             } else if cmd.starts_with("q") {
                 ret.push(Instr::QUIT);
                 remove(cmd, 1);
@@ -100,7 +116,6 @@ fn execCmd(cmd : &mut String, term_s : &mut Size2) -> Vec<Instr> {
             }
         }
     }
-
     ret
 }
 
@@ -122,9 +137,9 @@ fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut S
     ret
 }
 
-// Function that handles the COMMAND mode, manually collecting the command and handling the
-// execution
+// Function that handles the COMMAND mode, manually collecting the command and handling the execution
 fn command(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2) -> Vec<Instr> {
+    print!("{}", termion::cursor::Goto(1, term_s.y));
     let mut cmd : String = String::new();
     let mut curr_pos : Size2 = Size2::new(1, term_s.y);
     
@@ -168,6 +183,60 @@ fn command(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut 
     ret
 }
 
+fn runningCommand(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2, cmd : &mut String) -> Vec<Instr> {
+    let mut ret : Vec<Instr> = Vec::new();
+    setupScreen(stdout, term_s);
+    print!("{}{}Running : {}{}",
+           termion::cursor::Goto(1, 1),
+           color::Fg(color::Green),
+           cmd,
+           color::Fg(color::Reset));
+
+    let output = if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", cmd])
+            .output()
+            .expect("failed to execute process")
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .output()
+            .expect("failed to execute process")
+    };
+
+    let output_iter = std::str::from_utf8(&output.stdout).unwrap().split("\n");
+
+    let mut h = 2;
+    for line in output_iter {
+        print!("{}{}",
+               termion::cursor::Goto(1, h),
+               line);
+        h += 1;
+        if h > term_s.y - 3 { break; }
+    }
+
+    print!("{}{}{}{}{}",
+           termion::cursor::Goto(1, term_s.y-1),
+           color::Bg(color::LightBlack),
+           output.status,
+           color::Bg(color::Reset),
+           termion::cursor::Goto(1, term_s.y));
+
+    stdout.flush();
+
+    for c in stdin.keys() {
+        match c.unwrap() {
+            Key::Char('\n') => {
+                ret.push(Instr::CHANGE_MODE_COMMAND);
+                break;
+            },
+            _ => {},
+        }
+    }
+    ret
+}
+
 // Entry point
 fn main() {
     // Gets the arguments given to the program through command prompt
@@ -196,6 +265,7 @@ fn main() {
     // Sets the launching mode to COMMAND
     let mut curr_mode : ViewModes = ViewModes::COMMAND;
 
+    let mut cmd : String = String::new();
     // Main loop
     while run {
         // Instructions given by the different handlers for the program to execute
@@ -204,16 +274,19 @@ fn main() {
         // Chooses which function to call depending on the current mode
         match curr_mode {
             // Gets a set of instructions back from the COMMAND mode handler
-            ViewModes::COMMAND  => instrs = command(&mut stdin, &mut stdout, &mut term_size),
-            ViewModes::INSERT   => instrs = insert(&mut stdin, &mut stdout, &mut term_size),
+            ViewModes::COMMAND      => instrs = command(&mut stdin, &mut stdout, &mut term_size),
+            ViewModes::INSERT       => instrs = insert(&mut stdin, &mut stdout, &mut term_size),
+            ViewModes::RUNNING_CMD  => instrs = runningCommand(&mut stdin, &mut stdout, &mut term_size, &mut cmd),
         }
 
         // Loops over all the instructions to be executed
         for instr in instrs {
             match instr {
-                Instr::QUIT                 => run = false,
-                Instr::CHANGE_MODE_COMMAND  => curr_mode = ViewModes::COMMAND,
-                Instr::CHANGE_MODE_INSERT   => curr_mode = ViewModes::INSERT,
+                Instr::QUIT                     => run = false,
+                Instr::RUN(c)                   => cmd = c,
+                Instr::CHANGE_MODE_COMMAND      => curr_mode = ViewModes::COMMAND,
+                Instr::CHANGE_MODE_INSERT       => curr_mode = ViewModes::INSERT,
+                Instr::CHANGE_MODE_RUNNING_CMD  => curr_mode = ViewModes::RUNNING_CMD,
                 _ => {},
             }
         }
