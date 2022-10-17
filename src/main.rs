@@ -101,6 +101,8 @@ fn loadFile(path : &mut String, buff : &mut Vec<String>) -> std::io::Result<()> 
         buff.push(String::from(line));
     }
 
+    buff.pop();
+
     Ok(())
 }
 
@@ -114,7 +116,7 @@ fn showEntireBuffer(buffer : &mut Vec<String>, offset : &mut Size2, stdout : &mu
     while i < term_s.y-2 && usize::from(i + offset.y) < buffer.len() {
         let line_nbr : u16 = offset.y + i;
         let line : &String = &buffer[line_nbr as usize];
-        print!("{}{}{}{} {}",
+        print!("{}{}{:>3}{} {}",
                termion::cursor::Goto(1, i+1),
                color::Fg(color::LightYellow),
                line_nbr + 1,
@@ -284,19 +286,12 @@ fn main() {
     let mut file_path : String = String::from(".");
     let mut buffer : Vec<String> = Vec::new();
 
-    if args.len() != 0 {
-        file_path = String::from(&args[0]);
+    if args.len() > 1 {
+        file_path = String::from(&args[1]);
         if loadFile(&mut file_path, &mut buffer).is_err() {
             buffer = Vec::new();
         }
     }
-
-    // Debug purposes only
-    buffer.push(String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit."));
-    buffer.push(String::from("Ut euismod at purus sed vehicula. In laoreet lectus ligula, sed aliquam lectus pellentesque sit amet."));
-    buffer.push(String::from("Aliquam tincidunt sit amet ipsum at semper."));
-    buffer.push(String::from("Praesent at ante vel dui sollicitudin interdum. Praesent lacus ante,"));
-    buffer.push(String::from("accumsan sed dui sed, porta viverra augue. Aliquam id. "));
 
     // Changes and sets the way stdin and stdout are handled
     let mut stdout = stdout().into_raw_mode().unwrap();
@@ -323,6 +318,7 @@ fn main() {
         let mut instrs : Vec<Instr> = Vec::new();
 
         showEntireBuffer(&mut buffer, &mut Size2::new(0, 0), &mut stdout, &mut term_size);
+        clearSeparatorLine(&mut term_size);
 
         // Chooses which function to call depending on the current mode
         match curr_mode {
