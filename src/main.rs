@@ -92,6 +92,7 @@ fn initScreen(stdout : &mut RawTerminal<Stdout>) -> Option<Size2> {
 
 fn loadFile(path : &mut String, buff : &mut Vec<String>) -> std::io::Result<()> {
     let file = File::open(path)?;
+    print!("test");
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
     buf_reader.read_to_string(&mut contents)?;
@@ -106,12 +107,23 @@ fn loadFile(path : &mut String, buff : &mut Vec<String>) -> std::io::Result<()> 
     Ok(())
 }
 
+fn saveFile(path : &mut String, buff : &mut Vec<String>) -> std::io::Result<()> {
+    let mut file = File::create(path)?;
+    print!("{}test", termion::cursor::Goto(1, 50));
+    for line in buff {
+        file.write_all(&line.as_bytes().to_vec());
+        file.write_all(&[10]);
+    }
+    Ok(())
+}
+
 fn updateBuffer(buffer : &mut Vec<String>, coord : &mut Size2, offset : &mut Size2, char : &str) {
     //let off_y = (offset.y + coord.y) as u16;
     buffer[(offset.y + coord.y) as usize].replace_range(coord.x as usize..(coord.x+1) as usize, char);
 }
 
 fn showEntireBuffer(buffer : &mut Vec<String>, offset : &mut Size2, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2) {
+    setupScreen(stdout, term_s);
     let mut i = 0;
     while i < term_s.y-2 && usize::from(i + offset.y) < buffer.len() {
         let line_nbr : u16 = offset.y + i;
@@ -133,6 +145,12 @@ fn remove(stri : &mut String, n : u16) {
     }
 }
 
+fn trim(stri : &mut String) {
+    while stri.starts_with(" ") {
+        remove(stri, 1);
+    }
+}
+
 fn execCmd(cmd : &mut String, term_s : &mut Size2) -> Vec<Instr> {
     let mut ret : Vec<Instr> = Vec::new();
     clearSeparatorLine(term_s);
@@ -146,12 +164,21 @@ fn execCmd(cmd : &mut String, term_s : &mut Size2) -> Vec<Instr> {
                 remove(cmd, 4);
             } else if cmd.starts_with("run") {
                 remove(cmd, 3);
+                trim(cmd);
                 ret.push(Instr::CHANGE_MODE_RUNNING_CMD);
                 ret.push(Instr::RUN(cmd.to_string()));
                 break;
             } else if cmd.starts_with("q") {
                 ret.push(Instr::QUIT);
                 remove(cmd, 1);
+            } else if cmd.starts_with("w") {
+                ret.push(Instr::SAVE_FILE);
+                remove(cmd, 1);
+            } else if cmd.starts_with("o") {
+                remove(cmd, 1);
+                trim(cmd);
+                ret.push(Instr::LOAD_FILE(cmd.to_string()));
+                break;
             } else {
                 remove(cmd, 1);
             }
@@ -310,7 +337,7 @@ fn main() {
 
     // Sets the launching mode to COMMAND
     let mut curr_mode : ViewModes = ViewModes::COMMAND;
-
+    let mut msg : String = String::new();
     let mut cmd : String = String::new();
     // Main loop
     while run {
@@ -319,6 +346,12 @@ fn main() {
 
         showEntireBuffer(&mut buffer, &mut Size2::new(0, 0), &mut stdout, &mut term_size);
         clearSeparatorLine(&mut term_size);
+        print!("{}{}{}{}",
+               termion::cursor::Goto(1, term_size.y-1),
+               color::Bg(color::LightBlack),
+               msg,
+               color::Bg(color::Reset));
+        msg = String::new();
 
         // Chooses which function to call depending on the current mode
         match curr_mode {
@@ -336,12 +369,23 @@ fn main() {
                 Instr::CHANGE_MODE_COMMAND      => curr_mode = ViewModes::COMMAND,
                 Instr::CHANGE_MODE_INSERT       => curr_mode = ViewModes::INSERT,
                 Instr::CHANGE_MODE_RUNNING_CMD  => curr_mode = ViewModes::RUNNING_CMD,
-                Instr::LOAD_FILE(mut path) => {
+                Instr::LOAD_FILE(mut path)      => {
                     buffer = Vec::new();
                     if loadFile(&mut path, &mut buffer).is_err() {
                         buffer = Vec::new();
+                        msg = format!("Failed to load file at {}", path);
+                    } else {
+                        file_path = path;
+                        msg = format!("Oppened {}", file_path);
                     }
-                }
+                },
+                Instr::SAVE_FILE                => {
+                    if saveFile(&mut file_path, &mut buffer).is_err() {
+                        msg = format!("Failed to save file at {}", file_path);
+                    } else {
+                        msg = format!("Saved to {}", file_path);
+                    }
+                },
                 _ => {},
             }
         }
