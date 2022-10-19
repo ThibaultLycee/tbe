@@ -364,7 +364,10 @@ fn main() {
         file_path = String::from(&args[1]);
         if loadFile(&mut file_path, &mut buffer).is_err() {
             buffer = Vec::new();
+            buffer.push(String::new());
         }
+    } else {
+        buffer.push(String::new());
     }
 
     // Changes and sets the way stdin and stdout are handled
@@ -424,6 +427,7 @@ fn main() {
                     buffer = Vec::new();
                     if loadFile(&mut path, &mut buffer).is_err() {
                         buffer = Vec::new();
+                        buffer.push(String::new());
                         msg = format!("Failed to load file at {}", path);
                     } else {
                         file_path = path;
