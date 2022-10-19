@@ -10,8 +10,6 @@ use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::{RawTerminal, IntoRawMode};
 
-use terminal_size::{Width, Height, terminal_size};
-
 // Differents mode for reading / editing
 enum ViewModes
 {
@@ -76,7 +74,7 @@ fn setupScreen(stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2) {
 
 fn initScreen(stdout : &mut RawTerminal<Stdout>) -> Option<Size2> {
     // Tries to get the terminal size
-    if let Some((Width(w), Height(h))) = terminal_size() {
+    if let Some((w, h)) = termion::terminal_size().ok() {
         // Prints a '~' at the begining of each line
         setupScreen(stdout, &mut Size2::new(w, h));
         print!("{}", termion::cursor::Goto(1, h));
@@ -117,26 +115,50 @@ fn saveFile(path : &mut String, buff : &mut Vec<String>) -> std::io::Result<()> 
     Ok(())
 }
 
-fn updateBuffer(buffer : &mut Vec<String>, coord : &mut Size2, offset : &mut Size2, char : &str) {
-    //let off_y = (offset.y + coord.y) as u16;
-    buffer[(offset.y + coord.y) as usize].replace_range(coord.x as usize..(coord.x+1) as usize, char);
+fn updateBuffer(buffer : &mut Vec<String>, coord : &mut Size2, offset : &mut Size2, chr : char) {
+    let mut line = &mut buffer[(offset.y + coord.y - 1) as usize];
+    if line.len() > coord.x.into() {
+        line.insert((coord.x - 5) as usize, chr);
+    } else {
+        line.push(chr);
+    }
 }
 
+fn showBufferLine(buffer : &mut Vec<String>, offset : &mut Size2, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2, line : u16) {
+    print!("{}{}{}{:>3}{} {}",
+           termion::cursor::Goto(1, offset.y),
+           termion::clear::CurrentLine,
+           color::Fg(color::LightYellow),
+           line+1,
+           color::Fg(color::Reset),
+           buffer[line as usize]);
+}
+    
 fn showEntireBuffer(buffer : &mut Vec<String>, offset : &mut Size2, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2) {
     setupScreen(stdout, term_s);
     let mut i = 0;
     while i < term_s.y-2 && usize::from(i + offset.y) < buffer.len() {
         let line_nbr : u16 = offset.y + i;
         let line : &String = &buffer[line_nbr as usize];
+    
         print!("{}{}{:>3}{} {}",
                termion::cursor::Goto(1, i+1),
                color::Fg(color::LightYellow),
-               line_nbr + 1,
+               line_nbr+1,
                color::Fg(color::Reset),
                line);
+
         i += 1;
     }
     stdout.flush();
+}
+
+fn getTermSize() -> std::result::Result<Size2, String> {
+    if let (x, y) = termion::terminal_size().unwrap() {
+        Ok(Size2::new(x, y))
+    } else {
+        Err(String::from("failed to get terminal size"))
+    }
 }
 
 fn remove(stri : &mut String, n : u16) {
@@ -188,8 +210,11 @@ fn execCmd(cmd : &mut String, term_s : &mut Size2) -> Vec<Instr> {
 }
 
 // Function that handles the INSERT mode, from switching back to COMMAND mode to just typing
-fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2) -> Vec<Instr> {
+fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut Size2, coord : &mut Size2, buffer : &mut Vec<String>) -> Vec<Instr> {
     let mut ret : Vec<Instr> = Vec::new();
+    
+    print!("{}", termion::cursor::Goto(coord.x+4, coord.y));
+    stdout.flush().unwrap();
 
     for c in stdin.keys() {
         match c.unwrap() {
@@ -198,8 +223,30 @@ fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut S
                 ret.push(Instr::CHANGE_MODE_COMMAND);
                 break;
             },
+            Key::Char('\n') => {
+            
+            },
+            Key::Delete => {
+                coord.x = 1;
+                buffer[coord.y as usize - 1] = String::new();
+            },
+            Key::Backspace => {
+                let mut line = &mut buffer[coord.y as usize - 1];
+                if coord.x > 1 {
+                    line.remove(coord.x as usize - 2);
+                    coord.x -= 1;
+                }
+            },
+            Key::Char(c) => {
+                updateBuffer(buffer, &mut Size2::new(coord.x+4, coord.y), &mut Size2::new(0, 0), c);
+                stdout.flush().unwrap();
+                coord.x += 1;
+            },
             _ => {}
         }
+        showBufferLine(buffer, &mut Size2::new(coord.x+4, coord.y), stdout, term_s, coord.y-1);
+        print!("{}", termion::cursor::Goto(coord.x+4, coord.y));
+        stdout.flush().unwrap();
     }
     stdout.flush().unwrap();
     ret
@@ -310,7 +357,7 @@ fn runningCommand(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s 
 fn main() {
     // Gets the arguments given to the program through command prompt
     let args : Vec<String> = env::args().collect();
-    let mut file_path : String = String::from(".");
+    let mut file_path : String = String::from("./temp.txt");
     let mut buffer : Vec<String> = Vec::new();
 
     if args.len() > 1 {
@@ -337,13 +384,17 @@ fn main() {
 
     // Sets the launching mode to COMMAND
     let mut curr_mode : ViewModes = ViewModes::COMMAND;
+    
     let mut msg : String = String::new();
     let mut cmd : String = String::new();
+    let mut editing_coord : Size2 = Size2::new(1, 1);
+
     // Main loop
     while run {
         // Instructions given by the different handlers for the program to execute
         let mut instrs : Vec<Instr> = Vec::new();
 
+        // Updates the screen, redraws everything
         showEntireBuffer(&mut buffer, &mut Size2::new(0, 0), &mut stdout, &mut term_size);
         clearSeparatorLine(&mut term_size);
         print!("{}{}{}{}",
@@ -355,9 +406,9 @@ fn main() {
 
         // Chooses which function to call depending on the current mode
         match curr_mode {
-            // Gets a set of instructions back from the COMMAND mode handler
+            // Gets a set of instructions back from the current mode handler
             ViewModes::COMMAND      => instrs = command(&mut stdin, &mut stdout, &mut term_size),
-            ViewModes::INSERT       => instrs = insert(&mut stdin, &mut stdout, &mut term_size),
+            ViewModes::INSERT       => instrs = insert(&mut stdin, &mut stdout, &mut term_size, &mut editing_coord, &mut buffer),
             ViewModes::RUNNING_CMD  => instrs = runningCommand(&mut stdin, &mut stdout, &mut term_size, &mut cmd),
         }
 
@@ -376,6 +427,7 @@ fn main() {
                         msg = format!("Failed to load file at {}", path);
                     } else {
                         file_path = path;
+                        editing_coord = Size2::new(1, 1);
                         msg = format!("Oppened {}", file_path);
                     }
                 },
@@ -390,10 +442,16 @@ fn main() {
             }
         }
 
+        // Updates the terminal size, in case it has changed
+        if let term_s = getTermSize().unwrap() {
+            term_size = term_s;
+        } else {
+            run = false;
+        }
+
     }
 
     // Exits the program, clears the screen
-    print!("{}Exiting...", termion::cursor::Goto(1, 1));
     print!("{}{}{}",
            EscChr::CLR,
            color::Fg(color::Reset),
