@@ -223,6 +223,26 @@ fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut S
                 ret.push(Instr::CHANGE_MODE_COMMAND);
                 break;
             },
+            Key::Left => {
+                if coord.x > 1 {
+                    coord.x -= 1;
+                }
+            },
+            Key::Right => {
+                if (coord.x as usize) < buffer[coord.y as usize - 1].len() + 1{
+                    coord.x += 1;
+                }
+            },
+            Key::Up => {
+                if coord.y > 1 {
+                    coord.y -= 1;
+                }
+            },
+            Key::Down => {
+                if (coord.y as usize) < buffer.len() {
+                    coord.y += 1;
+                }
+            },
             Key::Char('\n') => {
             
             },
@@ -244,6 +264,12 @@ fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut S
             },
             _ => {}
         }
+        // Puts back the pointer at the end of the current line if it exceeds it
+        if (coord.x as usize) > buffer[coord.y as usize - 1].len() {
+            coord.x = buffer[coord.y as usize - 1].len() as u16 + 1;
+        }
+
+        // Refreshes the screen
         showBufferLine(buffer, &mut Size2::new(coord.x+4, coord.y), stdout, term_s, coord.y-1);
         print!("{}", termion::cursor::Goto(coord.x+4, coord.y));
         stdout.flush().unwrap();
