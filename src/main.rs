@@ -244,17 +244,37 @@ fn insert(stdin : &mut Stdin, stdout : &mut RawTerminal<Stdout>, term_s : &mut S
                 }
             },
             Key::Char('\n') => {
-            
+                let line = coord.y as usize - 1;
+                let x = coord.x as usize - 1;
+                let old_line = String::from(buffer[line].as_str());
+                buffer.remove(line);
+                buffer.insert(line, (old_line.as_str()[..x]).to_string());
+                buffer.insert(line + 1, (old_line.as_str()[x..]).to_string());
+                coord.y += 1;
+                coord.x = 1;
+                showEntireBuffer(buffer, &mut Size2::new(coord.x+4, 0), stdout, term_s);
             },
             Key::Delete => {
                 coord.x = 1;
                 buffer[coord.y as usize - 1] = String::new();
             },
             Key::Backspace => {
-                let mut line = &mut buffer[coord.y as usize - 1];
+                let line = &mut buffer[coord.y as usize - 1];
                 if coord.x > 1 {
                     line.remove(coord.x as usize - 2);
                     coord.x -= 1;
+                } else {
+                    // Merge the previous line with the current one
+                    let line = coord.y as usize - 1;
+                    if line > 0 {
+                        let x = buffer[line - 1].len() + 1;
+                        let line_content = String::from(buffer[line].as_str());
+                        buffer[line - 1].push_str(line_content.as_str());
+                        buffer.remove(line);
+                        coord.y -= 1;
+                        coord.x = x as u16;
+                        showEntireBuffer(buffer, &mut Size2::new(coord.x + 4, 0), stdout, term_s);
+                    }
                 }
             },
             Key::Char(c) => {
