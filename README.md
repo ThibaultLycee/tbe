@@ -24,8 +24,9 @@ The Insert mode allows you to edit the opened file by simply typing some stuff.
 The use for different keys is as follow (checked if already implemented) :
  - [x] `chr` is used to type the choosen char
  - [x] `Backspace` to remove the previous char
- - [ ] `Enter` to print a new line
+ - [ ] `Enter` to add a new line
  - [x] `Delete` to delete the content of the current line
+ - [x] `Arrows` to move the cursor arround
 
 These are particular keys, used to do things not related to typing :
  - [x] `Esc` to get back to command mode
